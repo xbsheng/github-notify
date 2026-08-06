@@ -36,6 +36,7 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           FOLLOW_OWNER: ${{ vars.FOLLOW_OWNER }}
           REPO_OWNER: ${{ github.repository_owner }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 显式传入：token 不再自动注入 step 环境
           EVENT_NAME: ${{ github.event_name }}
         run: python .github/scripts/notify.py
       - name: 提交 followers 状态

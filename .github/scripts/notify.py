@@ -128,7 +128,7 @@ def event_message(name, ev, stats=""):
     if stats:
         lines.append(f"当前 {stats}")
     lines.append(url)
-    return f"【{head} {full}】", "\n".join(lines)
+    return f"{head} {full}", "\n".join(lines)
 
 
 def event_notify():
@@ -136,7 +136,7 @@ def event_notify():
     name = os.environ["EVENT_NAME"]
     if name == "workflow_dispatch":
         platforms = "、".join(configured_platforms()) or "无"
-        notify("【✅ 通知配置测试】", f"已启用平台：{platforms}")
+        notify("✅ 通知配置测试", f"已启用平台：{platforms}")
         return
     full = ev.get("repository", {}).get("full_name", "")
     stats = ""
@@ -222,7 +222,7 @@ if __name__ == "__main__":
                 },
             },
             "⭐ 123 · 🍴 4",
-        ) == ("【⭐ star me/r】", "alice star 了 me/r\n当前 ⭐ 123 · 🍴 4\nhttps://github.com/me/r")
+        ) == ("⭐ star me/r", "alice star 了 me/r\n当前 ⭐ 123 · 🍴 4\nhttps://github.com/me/r")
         t, c = event_message(
             "issues",
             {
@@ -236,7 +236,7 @@ if __name__ == "__main__":
                 },
             },
         )
-        assert t == "【📝 opened me/r】" and "Issue #3: bug" in c
+        assert t == "📝 opened me/r" and "Issue #3: bug" in c
         t, c = event_message(
             "pull_request",
             {
@@ -251,7 +251,7 @@ if __name__ == "__main__":
                 },
             },
         )
-        assert t == "【🔀 merged me/r】" and "PR #7: add pr" in c
+        assert t == "🔀 merged me/r" and "PR #7: add pr" in c
         t, c = event_message(
             "watch",
             {
@@ -260,7 +260,7 @@ if __name__ == "__main__":
                 "repository": {"full_name": "me/r", "html_url": "https://github.com/me/r"},
             },
         )
-        assert t == "【⭐ star me/r】" and "eve star 了 me/r" in c
+        assert t == "⭐ star me/r" and "eve star 了 me/r" in c
         print("selftest ok")
     elif "--dry-run" in sys.argv:
         dry_run()

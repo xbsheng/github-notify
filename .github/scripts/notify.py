@@ -153,7 +153,7 @@ def followers_notify():
         os.environ["GITHUB_API_URL"],
         os.environ["GITHUB_TOKEN"],
         owner,
-        Path("followers.json"),
+        Path(".github/followers.json"),
     )
     for u in new:
         title = f"👥 新粉丝: {u}"

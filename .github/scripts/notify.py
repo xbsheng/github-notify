@@ -61,10 +61,11 @@ def configured_platforms():
 
 
 def notify(title, text):
+    combined = f"{title}\n{text}"  # 飞书/Telegram 只有单段文本，标题拼进内容
     if os.environ.get("FEISHU_WEBHOOK"):
         post(
             os.environ["FEISHU_WEBHOOK"],
-            {"msg_type": "text", "content": {"text": text}},
+            {"msg_type": "text", "content": {"text": combined}},
         )
     if os.environ.get("PUSHPLUS_TOKEN"):
         post(
@@ -80,40 +81,54 @@ def notify(title, text):
     if os.environ.get("TG_BOT_TOKEN") and os.environ.get("TG_CHAT_ID"):
         post(
             f"https://api.telegram.org/bot{os.environ['TG_BOT_TOKEN']}/sendMessage",
-            {"chat_id": os.environ["TG_CHAT_ID"], "text": text},
+            {"chat_id": os.environ["TG_CHAT_ID"], "text": combined},
         )
     if not configured_platforms():
         print("未配置任何推送平台，跳过", file=sys.stderr)
 
 
-def event_text(name, ev):
-    sender = ev.get("sender", {}).get("login", "?")
+def repo_stats(api, token, full_name):
+    """仓库实时 star/fork 数；失败返回空串（通知不因统计失败中断）。"""
+    try:
+        req = urllib.request.Request(
+            f"{api}/repos/{full_name}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req) as r:
+            d = json.load(r)
+        return f"⭐ {d.get('stargazers_count', 0)} · 🍴 {d.get('forks_count', 0)}"
+    except Exception as e:
+        print(f"repo_stats {full_name} failed: {e}", file=sys.stderr)
+        return ""
+
+
+def event_message(name, ev, stats=""):
+    """返回 (标题, 内容)。标题精简为【动作 仓库名】，详情和统计放内容。"""
     repo = ev.get("repository", {})
     full = repo.get("full_name", "?")
     url = repo.get("html_url", "")
+    sender = ev.get("sender", {}).get("login", "?")
     if name in ("star", "watch"):  # watch(started) 即有人 star，见 notify.yml 注释
-        return f"⭐ {sender} star 了 {full}\n{url}"
-    if name == "fork":
+        head, detail = "⭐ star", f"{sender} star 了 {full}"
+    elif name == "fork":
         fk = ev.get("forkee", {})
-        return f"🍴 {sender} fork 了 {full} → {fk.get('full_name', '?')}\n{fk.get('html_url') or url}"
-    if name == "issues":
+        head, detail = "🍴 fork", f"{sender} fork 了 {full} → {fk.get('full_name', '?')}"
+    elif name == "issues":
         i = ev.get("issue", {})
-        return (
-            f"📝 Issue #{i.get('number')} {ev.get('action')}: "
-            f"{i.get('title')}（by {i.get('user', {}).get('login')}）\n{i.get('html_url', '')}"
-        )
-    if name == "pull_request":
+        head = f"📝 {ev.get('action')}"
+        detail = f"Issue #{i.get('number')}: {i.get('title')}（by {i.get('user', {}).get('login')}）"
+    elif name == "pull_request":
         pr = ev.get("pull_request", {})
-        action = (
-            "🔀 merged"
-            if ev.get("action") == "closed" and pr.get("merged")
-            else f"📥 PR {ev.get('action')}"
-        )
-        return (
-            f"{action} #{pr.get('number')}: {pr.get('title')}"
-            f"（by {pr.get('user', {}).get('login')}）\n{pr.get('html_url', '')}"
-        )
-    return f"[{name}] {sender} → {full}"
+        action = "merged" if ev.get("action") == "closed" and pr.get("merged") else ev.get("action")
+        head = "🔀 merged" if action == "merged" else "📥 " + action
+        detail = f"PR #{pr.get('number')}: {pr.get('title')}（by {pr.get('user', {}).get('login')}）"
+    else:
+        head, detail = name, f"{sender} → {full}"
+    lines = [detail]
+    if stats:
+        lines.append(f"当前 {stats}")
+    lines.append(url)
+    return f"【{head} {full}】", "\n".join(lines)
 
 
 def event_notify():
@@ -121,10 +136,14 @@ def event_notify():
     name = os.environ["EVENT_NAME"]
     if name == "workflow_dispatch":
         platforms = "、".join(configured_platforms()) or "无"
-        notify("GitHub 通知配置测试", f"✅ 配置正确，已启用平台：{platforms}")
+        notify("【✅ 通知配置测试】", f"已启用平台：{platforms}")
         return
-    text = event_text(name, ev)
-    notify(text.split("\n")[0], text)
+    full = ev.get("repository", {}).get("full_name", "")
+    stats = ""
+    if full:
+        stats = repo_stats(os.environ["GITHUB_API_URL"], os.environ["GITHUB_TOKEN"], full)
+    title, text = event_message(name, ev, stats)
+    notify(title, text)
 
 
 def diff_followers(prev, current, state: Path):
@@ -161,25 +180,26 @@ def followers_notify():
         Path(".github/followers.json"),
     )
     for u in new:
-        title = f"👥 新粉丝: {u}"
-        notify(title, f"{title}（{owner}）\nhttps://github.com/{u}")
+        notify(f"👥 新粉丝 {u}", f"你新增了粉丝 {u}\nhttps://github.com/{u}")
 
 
 def dry_run():
     print("已配置平台：", "、".join(configured_platforms()) or "无")
-    print("示例消息：")
-    print(
-        event_text(
-            "star",
-            {
-                "sender": {"login": "alice"},
-                "repository": {
-                    "full_name": "me/r",
-                    "html_url": "https://github.com/me/r",
-                },
+    title, text = event_message(
+        "watch",
+        {
+            "action": "started",
+            "sender": {"login": "alice"},
+            "repository": {
+                "full_name": "me/r",
+                "html_url": "https://github.com/me/r",
             },
-        )
+        },
+        "⭐ 123 · 🍴 4",
     )
+    print("标题：", title)
+    print("内容：")
+    print(text)
 
 
 if __name__ == "__main__":
@@ -191,20 +211,19 @@ if __name__ == "__main__":
             assert diff_followers(None, ["a"], st) == []  # 首次只记录
             assert diff_followers(["a", "b"], ["b", "c"], st) == ["c"]
             assert json.loads(st.read_text()) == ["b", "c"]
-        assert (
-            event_text(
-                "star",
-                {
-                    "sender": {"login": "alice"},
-                    "repository": {
-                        "full_name": "me/r",
-                        "html_url": "https://github.com/me/r",
-                    },
+        assert event_message(
+            "watch",
+            {
+                "action": "started",
+                "sender": {"login": "alice"},
+                "repository": {
+                    "full_name": "me/r",
+                    "html_url": "https://github.com/me/r",
                 },
-            )
-            == "⭐ alice star 了 me/r\nhttps://github.com/me/r"
-        )
-        assert "Issue #3 opened: bug" in event_text(
+            },
+            "⭐ 123 · 🍴 4",
+        ) == ("【⭐ star me/r】", "alice star 了 me/r\n当前 ⭐ 123 · 🍴 4\nhttps://github.com/me/r")
+        t, c = event_message(
             "issues",
             {
                 "action": "opened",
@@ -217,10 +236,12 @@ if __name__ == "__main__":
                 },
             },
         )
-        assert "🔀 merged #7: add pr" in event_text(
+        assert t == "【📝 opened me/r】" and "Issue #3: bug" in c
+        t, c = event_message(
             "pull_request",
             {
                 "action": "closed",
+                "repository": {"full_name": "me/r"},
                 "pull_request": {
                     "number": 7,
                     "title": "add pr",
@@ -230,7 +251,8 @@ if __name__ == "__main__":
                 },
             },
         )
-        assert "⭐ eve star 了 me/r" in event_text(
+        assert t == "【🔀 merged me/r】" and "PR #7: add pr" in c
+        t, c = event_message(
             "watch",
             {
                 "action": "started",
@@ -238,6 +260,7 @@ if __name__ == "__main__":
                 "repository": {"full_name": "me/r", "html_url": "https://github.com/me/r"},
             },
         )
+        assert t == "【⭐ star me/r】" and "eve star 了 me/r" in c
         print("selftest ok")
     elif "--dry-run" in sys.argv:
         dry_run()

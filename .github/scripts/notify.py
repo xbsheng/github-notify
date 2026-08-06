@@ -38,8 +38,13 @@ def post(url, data, form=False):
     try:
         with urllib.request.urlopen(req) as r:
             r.read()
-    except Exception as e:  # 推送失败不中断工作流
-        print(f"post {url} failed: {e}", file=sys.stderr)
+    except Exception as e:  # 推送失败不中断工作流，但打印 API 返回的具体原因
+        detail = ""
+        try:
+            detail = f": {e.read().decode()}" if hasattr(e, "read") else ""
+        except Exception:
+            pass
+        print(f"post {url} failed: {e}{detail}", file=sys.stderr)
 
 
 def configured_platforms():
